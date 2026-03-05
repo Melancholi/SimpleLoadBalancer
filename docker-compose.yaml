@@ -1,0 +1,30 @@
+services:
+  backend1:
+    build: ./server
+    environment:
+      - SERVER_NAME=backend1
+
+  backend2:
+    build: ./server
+    environment:
+      - SERVER_NAME=backend2
+
+  backend3:
+    build: ./server
+    environment:
+      - SERVER_NAME=backend3
+
+  loadbalancer:
+    build: ./loadbalancer
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend1
+      - backend2
+      - backend3
+
+
+networks:
+  default:
+    name: loadbalancer
+    driver: bridge
