@@ -1,10 +1,10 @@
-FROM golang:1.25.6  AS build
+FROM golang:1.25.6 AS build
 
 WORKDIR /src
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build  -o /server .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -trimpath -o /server .
 
 FROM alpine:3.18
 
