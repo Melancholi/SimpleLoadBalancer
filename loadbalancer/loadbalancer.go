@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -33,6 +34,11 @@ func NewLoadBalancer(addrs []string) *LoadBalancer {
 	}
 }
 
+func (lb *LoadBalancer) checkForURLs(addr string) bool {
+	for _, u := range lb.urls {
+		if u == addr
+	}	
+}
 // Round-robin
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	/**
@@ -45,13 +51,31 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	list := []string{
+	lb := NewLoadBalancer([]string{
 		"http://backend1:8080",
 		"http://backend2:8080",
 		"http://backend3:8080",
-	}
-	lb := NewLoadBalancer(list)
-
+	})
+	http.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
+		/*
+			add the url of the ip that hit this endpoint
+		*/
+		fmt.Fprintf(w, "Registering...\n")
+		
+		lb.checkForURLs(r.URL.String())
+		parsed, err := url.Parse(r.URL.String())
+		if err != nil {
+			log.Fatal("LoadBalancer Initialisation error: ", err)
+		}
+		proxy := httputil.NewSingleHostReverseProxy(parsed)
+		lb.urls = append(lb.urls, proxy)
+	})
+	http.HandleFunc("/unregister", func(w http.ResponseWriter, r *http.Request) {
+		/*
+			remove the url of the ip that hit this endpoint
+		*/
+		fmt.Fprintf(w, "Unregistering...\n")
+	})
 	log.Println("Load balancer running on :8080")
 	err := http.ListenAndServe(":8080", lb)
 	if err != nil {
