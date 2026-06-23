@@ -50,6 +50,12 @@ Have a machine run multiple instances of the servers, while having a loadbalance
 Pros: Easier setup, less configuration troubles
 Cons: requires in house hardware, single point of failure if hardware fails
 
-#### Approach 3: Add-on
+#### Approach-3: Add-on 
 
 Possibly make is to that the LB is running on it's own instance, and have other resources connect to it when need be with a register/unregister endpoint
+
+## Progress Report
+
+Health Checks added, need to start testing servers when under pressure with the lib I found before.
+
+*Important* Need to figure out server discovery, that way I won't have to worry about configs to show where servers are at (Leads back to [Approach 3](#approach-3:-add-on))
