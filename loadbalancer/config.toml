@@ -1,7 +1,16 @@
-
 title = "Load Balancer Config"
 
 [server]
-server_list = []
+health_check_interval = 10
 
+[[server.servers]]
+url = "http://backend1:8080"
+health_endpoint = "/health"
 
+[[server.servers]]
+url = "http://backend2:8080"
+health_endpoint = "/health"
+
+[[server.servers]]
+url = "http://backend3:8080"
+health_endpoint = "/health"
