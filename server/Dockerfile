@@ -4,7 +4,7 @@ WORKDIR /src
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="all=-N -l" -trimpath -o /server .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -trimpath -o /server .
 
 FROM alpine:3.18
 
