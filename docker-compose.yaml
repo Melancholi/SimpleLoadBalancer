@@ -1,30 +1,33 @@
 services:
   backend1:
     build: ./server
+    hostname: backend1
     environment:
       - SERVER_NAME=backend1
     ports:
       - "8081:8080"
     networks:
-      - loadbalancer
+      - my-network
 
   backend2:
     build: ./server
+    hostname: backend2
     environment:
       - SERVER_NAME=backend2
     ports:
       - "8082:8080"
     networks:
-      - loadbalancer
+      - my-network
 
   backend3:
     build: ./server
+    hostname: backend3
     environment:
       - SERVER_NAME=backend3
     ports:
       - "8083:8080"
     networks:
-      - loadbalancer
+      - my-network
 
   loadbalancer:
     build: ./loadbalancer
@@ -35,8 +38,8 @@ services:
       - backend2
       - backend3
     networks:
-      - loadbalancer
+      - my-network
 
 networks:
-  loadbalancer:
+  my-network:
     driver: bridge
