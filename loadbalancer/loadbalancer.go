@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -156,7 +157,12 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "No backends available", http.StatusServiceUnavailable)
 		return
 	}
-
+	addr, err := net.LookupHost(backend.URL.Hostname())
+	if err != nil {
+		log.Printf("Failed to lookup backend records: %s\n", err)
+	} else {
+		log.Printf("Backend records: %s\n", addr)
+	}
 	backend.Proxy.ServeHTTP(w, r)
 }
 
