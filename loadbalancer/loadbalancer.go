@@ -32,7 +32,7 @@ type LoadBalancer struct {
 	mu       sync.RWMutex
 }
 
-func NewLoadBalancer(servers []ServerConfig) *LoadBalancer {
+func NewLoadBalancer() *LoadBalancer {
 	var backends []*Backend
 
 	for _, s := range servers {
@@ -87,11 +87,7 @@ func (lb *LoadBalancer) checkAllBackends() {
 }
 
 func (lb *LoadBalancer) checkBackend(backend *Backend) {
-	endpoint := backend.HealthCheck.Endpoint
-
-	if endpoint == "" {
-		endpoint = "/health"
-	}
+	endpoint := "/heatlh"
 
 	healthURL := fmt.Sprintf("http://%s%s", backend.URL.Host, endpoint)
 
@@ -169,7 +165,7 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func main() {
 	config := LoadConfig("config.toml")
 
-	lb := NewLoadBalancer(config.Server.ServerList)
+	lb := NewLoadBalancer()
 
 	http.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
 		/*

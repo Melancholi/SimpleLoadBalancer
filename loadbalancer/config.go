@@ -6,14 +6,9 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-type ServerConfig struct {
-	URL            string `toml:"url"`
-	HealthEndpoint string `toml:"health_endpoint"`
-}
 type Config struct {
 	Server struct {
 		HealthCheckInterval int            `toml:"health_check_interval"`
-		ServerList          []ServerConfig `toml:"servers"`
 	} `toml:"server"`
 }
 
