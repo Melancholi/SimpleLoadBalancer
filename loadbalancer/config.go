@@ -1,14 +1,16 @@
-package main
+package loadbalancer
 
 import (
 	"log"
 	"os"
+
 	"github.com/BurntSushi/toml"
 )
 
 type Config struct {
 	Server struct {
-		HealthCheckInterval int            `toml:"health_check_interval"`
+		HealthCheckInterval int `toml:"health_check_interval"`
+		HealthFailRate      int `toml:"health_fail_rate"`
 	} `toml:"server"`
 }
 
