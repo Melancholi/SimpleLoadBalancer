@@ -2,3 +2,4 @@ title = "Load Balancer Config"
 
 [server]
 health_check_interval = 30
+health_fail_rate = 0
