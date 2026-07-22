@@ -1,42 +1,23 @@
 services:
-  backend1:
-    build: ./server
-    hostname: backend1
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
     environment:
-      - SERVER_NAME=backend1
-    ports:
-      - "8081:8080"
-    networks:
-      - my-network
-
-  backend2:
-    build: ./server
-    hostname: backend2
-    environment:
-      - SERVER_NAME=backend2
-    ports:
-      - "8082:8080"
-    networks:
-      - my-network
-
-  backend3:
-    build: ./server
-    hostname: backend3
-    environment:
-      - SERVER_NAME=backend3
-    ports:
-      - "8083:8080"
+      SERVER_NAME: backend
+      SERVER_TYPE: internal_backend
+      HEALTH_FAIL_RATE: 0
     networks:
       - my-network
 
   loadbalancer:
-    build: ./loadbalancer
+    build:
+      context: .
+      dockerfile: loadbalancer/Dockerfile
     ports:
       - "8080:8080"
     depends_on:
-      - backend1
-      - backend2
-      - backend3
+      - backend
     networks:
       - my-network
 
