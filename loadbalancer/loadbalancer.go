@@ -28,17 +28,39 @@ type Backend struct {
 }
 
 type LoadBalancer struct {
-	active  map[string]*Backend // keyed by IP
-	counter atomic.Uint64
-	mu      sync.RWMutex
+	active    map[string]*Backend // keyed by IP
+	counter   atomic.Uint64
+	mu        sync.RWMutex
+	stopCh    chan struct{}
+	closeOnce sync.Once
 }
 
 func NewLoadBalancer() *LoadBalancer {
 	lb := &LoadBalancer{
 		active: make(map[string]*Backend),
+		stopCh: make(chan struct{}),
 	}
-	go lb.startDiscovery(30 * time.Second)
+	go lb.startDiscovery(30*time.Second, lb.stopCh)
 	return lb
+}
+
+// Close stops discovery and cancels all running health checks.
+func (lb *LoadBalancer) Close() {
+	lb.closeOnce.Do(func() {
+		if lb.stopCh != nil {
+			close(lb.stopCh)
+		}
+
+		lb.mu.Lock()
+		defer lb.mu.Unlock()
+
+		for ip, backend := range lb.active {
+			if backend.cancel != nil {
+				backend.cancel()
+			}
+			delete(lb.active, ip)
+		}
+	})
 }
 
 // newBackend constructs a Backend for a raw IP address returned by DNS.
@@ -66,15 +88,20 @@ func newBackend(ip string) *Backend {
 }
 
 // startDiscovery polls DNS on the given interval and reconciles the active map.
-func (lb *LoadBalancer) startDiscovery(interval time.Duration) {
+func (lb *LoadBalancer) startDiscovery(interval time.Duration, stopCh <-chan struct{}) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	// Run immediately on startup, then on each tick.
 	lb.syncBackends()
 
-	for range ticker.C {
-		lb.syncBackends()
+	for {
+		select {
+		case <-ticker.C:
+			lb.syncBackends()
+		case <-stopCh:
+			return
+		}
 	}
 }
 

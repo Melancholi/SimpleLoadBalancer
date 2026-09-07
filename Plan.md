@@ -59,3 +59,13 @@ Possibly make is to that the LB is running on it's own instance, and have other 
 Health Checks added, need to start testing servers when under pressure with the lib I found before.
 
 *Important* Need to figure out server discovery, that way I won't have to worry about configs to show where servers are at (Leads back to [Approach 3](#approach-3:-add-on))
+
+
+22/07/2026
+
+I worked on Service Discovery, I implemented a A record based approach, because SRV records seem overkill and complicated to use for Docker. Since docker already uses A Records when using as Bridge Network, this was easier to implement.
+
+I looked at [RFC 8482](https://datatracker.ietf.org/doc/html/rfc8482) for some inspiration, though it was a bit complex so I couldn't understand everything it was showing me.
+
+
+**What next?** Either go towards customizations for the loadbalancer features, or trying to integrate this project with other projects of mine.
