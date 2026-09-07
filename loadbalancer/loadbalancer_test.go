@@ -130,35 +130,39 @@ func TestLoadBalancerUnderPressureWithHey(t *testing.T) {
 		t.Skip("hey is not installed")
 	}
 
-	var backendHits atomic.Int64
-	backendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		backendHits.Add(1)
-		fmt.Fprint(w, "backend-ok")
-	}))
-	t.Cleanup(backendServer.Close)
+	const backendCount = 5
+	var backendHits [backendCount]atomic.Int64
+	active := make(map[string]*Backend, backendCount)
 
-	parsedURL, err := url.Parse(backendServer.URL)
-	if err != nil {
-		t.Fatalf("parse backend URL: %v", err)
-	}
+	for i := 0; i < backendCount; i++ {
+		index := i
+		backendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			backendHits[index].Add(1)
+			fmt.Fprintf(w, "backend-%d", index+1)
+		}))
+		t.Cleanup(backendServer.Close)
 
-	lb := &LoadBalancer{
-		active: map[string]*Backend{
-			"10.0.0.1": {
-				URL:   parsedURL,
-				Proxy: httputil.NewSingleHostReverseProxy(parsedURL),
-				HealthCheck: &HealthCheck{
-					Status: true,
-				},
+		parsedURL, err := url.Parse(backendServer.URL)
+		if err != nil {
+			t.Fatalf("parse backend %d URL: %v", index+1, err)
+		}
+
+		active[fmt.Sprintf("10.0.0.%d", index+1)] = &Backend{
+			URL:   parsedURL,
+			Proxy: httputil.NewSingleHostReverseProxy(parsedURL),
+			HealthCheck: &HealthCheck{
+				Status: true,
 			},
-		},
+		}
 	}
+
+	lb := &LoadBalancer{active: active}
 
 	lbServer := httptest.NewServer(lb)
 	t.Cleanup(lbServer.Close)
 
-	requests := 1000
-	concurrency := 50
+	requests := 10000
+	concurrency := 100
 	output, err := exec.Command(
 		"hey",
 		"-n", strconv.Itoa(requests),
@@ -171,13 +175,28 @@ func TestLoadBalancerUnderPressureWithHey(t *testing.T) {
 		t.Fatalf("hey failed: %v\noutput:\n%s", err, string(output))
 	}
 
-	if backendHits.Load() == 0 {
-		t.Fatal("expected hey traffic to reach the backend")
+	var totalHits int64
+	for i := range backendHits {
+		hits := backendHits[i].Load()
+		if hits == 0 {
+			t.Fatalf("expected hey traffic to reach backend %d", i+1)
+		}
+		totalHits += hits
 	}
 
 	if !strings.Contains(string(output), "Status code distribution") {
 		t.Fatalf("unexpected hey output:\n%s", string(output))
 	}
 
-	t.Logf("requests=%d concurrency=%d backend_hits=%d", requests, concurrency, backendHits.Load())
+	if totalHits != int64(requests) {
+		t.Fatalf("expected %d total backend hits, got %d", requests, totalHits)
+	}
+
+	t.Logf("requests=%d concurrency=%d backend_hits=%v", requests, concurrency, []int64{
+		backendHits[0].Load(),
+		backendHits[1].Load(),
+		backendHits[2].Load(),
+		backendHits[3].Load(),
+		backendHits[4].Load(),
+	})
 }
