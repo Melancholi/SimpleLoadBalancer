@@ -54,6 +54,8 @@ docker run -e SERVER_NAME=outside-server -e SERVER_TYPE=external_backend -h back
 
 I learned most of how it works from looking online, though my main source was this [https://www.researchgate.net/publication/388612894_A_Comprehensive_Study_of_Load_Balancing_Architectures_in_Cloud_Computing](article)
 
+And also a tiny bit from [RFC 8482](https://datatracker.ietf.org/doc/html/rfc8482) I had difficulty understanding what I was reading, so not much was implemented from the article, but nonetheless I'll mention it.
+
 ## How I tested it
 
 I used [https://github.com/rakyll/hey](Hey) to stress test the application, using various parameters to see how it handled traffic
