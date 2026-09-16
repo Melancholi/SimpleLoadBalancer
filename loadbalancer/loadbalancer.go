@@ -28,7 +28,7 @@ type Backend struct {
 }
 
 type LoadBalancer struct {
-	active    map[string]*Backend // keyed by IP
+	active    map[string]*Backend
 	counter   atomic.Uint64
 	mu        sync.RWMutex
 	stopCh    chan struct{}
@@ -63,9 +63,7 @@ func (lb *LoadBalancer) Close() {
 	})
 }
 
-// newBackend constructs a Backend for a raw IP address returned by DNS.
 func newBackend(ip string) *Backend {
-	// DNS gives us bare IPs; backends listen on port 8080
 	rawURL := fmt.Sprintf("http://%s:8080", ip)
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -82,17 +80,15 @@ func newBackend(ip string) *Backend {
 		URL:   parsed,
 		Proxy: proxy,
 		HealthCheck: &HealthCheck{
-			Status: true, // optimistic until first check
+			Status: true,
 		},
 	}
 }
 
-// startDiscovery polls DNS on the given interval and reconciles the active map.
 func (lb *LoadBalancer) startDiscovery(interval time.Duration, stopCh <-chan struct{}) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	// Run immediately on startup, then on each tick.
 	lb.syncBackends()
 
 	for {
@@ -105,8 +101,6 @@ func (lb *LoadBalancer) startDiscovery(interval time.Duration, stopCh <-chan str
 	}
 }
 
-// syncBackends performs a DNS lookup and diffs the result against active backends.
-// New IPs get a backend + health check goroutine. Gone IPs get cancelled and removed.
 func (lb *LoadBalancer) syncBackends() {
 	ips, err := net.LookupHost("backend")
 	if err != nil {
@@ -116,7 +110,6 @@ func (lb *LoadBalancer) syncBackends() {
 
 	log.Printf("DNS resolved backend -> %v", ips)
 
-	// Build a set for O(1) membership checks.
 	resolved := make(map[string]struct{}, len(ips))
 	for _, ip := range ips {
 		resolved[ip] = struct{}{}
@@ -223,11 +216,10 @@ func (lb *LoadBalancer) getNextHealthyBackend() *Backend {
 		attempts++
 	}
 
-	// All backends unhealthy; return nil rather than serving a bad one.
 	return nil
 }
 
-// ServeHTTP implements round-robin proxying.
+// ServeHTTP implements round-robin proxying .
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backend := lb.getNextHealthyBackend()
 	if backend == nil {
