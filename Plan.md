@@ -69,3 +69,27 @@ I looked at [RFC 8482](https://datatracker.ietf.org/doc/html/rfc8482) for some i
 
 
 **What next?** Either go towards customizations for the loadbalancer features, or trying to integrate this project with other projects of mine.
+
+27/09/2026
+**What I'll do now**
+I realised that the code is way too tightly coupled, the discovery algorithm is in the loadbalancer, the health checks are managed by the loadbalancer, the selection algorithm is AGAIN decided by the loadbalancer.
+If I want to make this an actual tool to be used, it needs to be easily modifiable, but like this it is impossible to do so.
+
+Task:
+- Separation of concern: Separate the different parts of the load balancer into different files(Discovery, Health Check, Selection Algorithm)
+- From those, plug them back into the LB as interfaces to solve the tightly coupled problem.
+
+healthcheck.go:
+
+- Move the goroutine checks to this file, and have LB just call it 
+- Move checkBackends and runHealthCheck into file
+
+discovery.go:
+
+- Create function DNS discovery that uses original logic for discovery in the lb, the use that instead in the LB
+Reason: If ever I want to make another discovery method, I'll need to be able to easily remove and change functions
+
+selection.go:
+
+- This will decide the selection algorithm for the servers
+- Replace getNextBackend
