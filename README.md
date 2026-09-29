@@ -1,6 +1,8 @@
-# SimpleLoadBalancer
+<h1 style="display:flex;">
+    <img src="./SimpleLoadBalancer.png" alt="SimpleLoadBalancer architecture" height="50px">
+    <span style="align-self:center;">SimpleLoadBalancer </span>
+</h1>
 
-<img src="./SimpleLoadBalancer.png" alt="SimpleLoadBalancer architecture" width="300" height="200">
 
 Load Balancer implemented in go to balance traffic between instances of a server maintained using docker containers
 
