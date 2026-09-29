@@ -1,6 +1,6 @@
-<h1 style="display:flex;">
+<h1 style="display:flex;align-items:'center';">
     <img src="./SimpleLoadBalancer.png" alt="SimpleLoadBalancer architecture" height="50px">
-    <span style="align-self:center;">SimpleLoadBalancer </span>
+    <span style="align-self:'center'; justify-self:'center';">SimpleLoadBalancer </span>
 </h1>
 
 
