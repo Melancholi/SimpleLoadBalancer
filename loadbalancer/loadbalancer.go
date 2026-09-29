@@ -30,6 +30,7 @@ type Options struct {
 	Selection     SelectionStrategy
 	HealthChecker *HealthChecker
 	Discovery     DiscoveryStrategy
+	backendPort   string
 	//maybe logger
 }
 
@@ -45,7 +46,7 @@ type LoadBalancer struct {
 	unavailable   atomic.Uint64
 }
 
-func NewLoadBalancer(opts Options) *LoadBalancer {
+func NewLoadBalancer(opts Options, Config Config) *LoadBalancer {
 	if opts.Selection == nil {
 		opts.Selection = &RoundRobinSelection{}
 	}
@@ -96,8 +97,8 @@ func (lb *LoadBalancer) Close() {
 	})
 }
 
-func newBackend(ip string) *Backend {
-	rawURL := fmt.Sprintf("http://%s:8080", ip)
+func newBackend(ip string, backendPort string) *Backend {
+	rawURL := fmt.Sprintf("http://%s:%s", ip, backendPort)
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		log.Printf("Error parsing backend URL %s: %v", rawURL, err)
@@ -148,7 +149,7 @@ func (lb *LoadBalancer) syncBackends(ips []string) {
 	// Add backends that were newly discovered.
 	for ip := range resolved {
 		if _, exists := lb.active[ip]; !exists {
-			backend := newBackend(ip)
+			backend := newBackend(ip, lb.options.backendPort)
 			if backend == nil {
 				continue
 			}

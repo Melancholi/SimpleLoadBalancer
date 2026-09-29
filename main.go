@@ -25,8 +25,8 @@ func main() {
 			Endpoint: cfg.Server.HealthEndpoint,
 			Client:   &http.Client{Timeout: 5 * time.Second},
 		},
-		Discovery: loadbalancer.DNSDiscovery{Hostname: "backend", Interval: 30 * time.Second},
-	})
+		Discovery: loadbalancer.DNSDiscovery{Hostname: cfg.Server.Hostname, Interval: 30 * time.Second},
+	}, cfg)
 	defer lb.Close()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

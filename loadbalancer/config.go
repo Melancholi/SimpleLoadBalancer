@@ -9,9 +9,10 @@ import (
 
 type Config struct {
 	Server struct {
+		Hostname            string `toml:"hostname"`
+		BackendPort         string `toml:"backend_port"`
 		HealthEndpoint      string `toml:"health_endpoint"`
 		HealthCheckInterval int    `toml:"health_check_interval"`
-		HealthFailRate      int    `toml:"health_fail_rate"`
 	} `toml:"server"`
 }
 

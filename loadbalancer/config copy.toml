@@ -1,0 +1,7 @@
+title = "Load Balancer Config"
+
+[server]
+hostname = <DNS Record A Name for you service>
+backend_port = <PORT of service>
+health_endpoint = <Health Check Endpoint>
+health_check_interval = <Calls HC every x>
