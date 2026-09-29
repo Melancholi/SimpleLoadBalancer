@@ -21,6 +21,21 @@ services:
     networks:
       - my-network
 
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      METRICS_URL: http://loadbalancer:9090/metrics
+    env_file:
+      - ".env"
+    depends_on:
+      - loadbalancer
+    networks:
+      - my-network
+
 networks:
   my-network:
     driver: bridge
