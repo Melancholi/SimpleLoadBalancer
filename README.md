@@ -4,13 +4,31 @@ Load Balancer implemented in go to balance traffic between instances of a server
 
 ## How to run
 
-Just run the command
+Just run the command, use make
 
 ```bash
-docker compose up --scale backend=3 -d
+make build 
+
+#x is the quantity of servers you want running
+make run COUNT=x 
 ```
 
 Then access the loadbalancer with the url `http://localhost:8080`
+
+## Admin panel
+
+An admin panel shows the load balancer metrics: total requests, requests per second, backend health, and requests/errors per backend.
+
+The panel is protected with HTTP Basic Auth. Set your own credentials in a `.env` file first (it is git-ignored). Compose refuses to start without it:
+
+```bash
+cp .env.example .env
+# then edit ADMIN_USERNAME and ADMIN_PASSWORD
+```
+
+After `docker compose up`, open `http://localhost:8081` and log in with those credentials.
+
+The load balancer serves the raw metrics as JSON on port `9090` (`/metrics`). That port is only reachable inside the docker network, so the admin panel is the only way to see the metrics from the host.
 
 ## How to test
 
