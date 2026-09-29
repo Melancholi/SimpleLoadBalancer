@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -14,17 +13,19 @@ import (
 	"time"
 )
 
-type HealthCheck struct {
-	Status    bool
-	CheckedAt time.Time
-	mu        sync.RWMutex
-}
-
 type Backend struct {
 	URL         *url.URL
 	Proxy       *httputil.ReverseProxy
 	HealthCheck *HealthCheck
 	cancel      context.CancelFunc
+
+	requests atomic.Uint64
+	errors   atomic.Uint64
+	inFlight atomic.Int64
+}
+
+// Options are the parts plugged into the load balancer. Any left empty fall
+// back to the defaults applied in NewLoadBalancer.
 type Options struct {
 	Selection     SelectionStrategy
 	HealthChecker *HealthChecker
@@ -33,27 +34,54 @@ type Options struct {
 }
 
 type LoadBalancer struct {
-	active    map[string]*Backend
-	counter   atomic.Uint64
-	mu        sync.RWMutex
-	stopCh    chan struct{}
-	closeOnce sync.Once
+	active        map[string]*Backend
+	mu            sync.RWMutex
+	ctx           context.Context
+	cancel        context.CancelFunc
+	closeOnce     sync.Once
+	options       Options
+	startedAt     time.Time
+	totalRequests atomic.Uint64
+	unavailable   atomic.Uint64
 }
 
-func NewLoadBalancer() *LoadBalancer {
-	lb := &LoadBalancer{
-		active: make(map[string]*Backend),
-		stopCh: make(chan struct{}),
+func NewLoadBalancer(opts Options) *LoadBalancer {
+	if opts.Selection == nil {
+		opts.Selection = &RoundRobinSelection{}
 	}
-	go lb.startDiscovery(30*time.Second, lb.stopCh)
+	if opts.HealthChecker == nil {
+		opts.HealthChecker = &HealthChecker{}
+	}
+	if opts.HealthChecker.Interval <= 0 {
+		opts.HealthChecker.Interval = 10 * time.Second
+	}
+	if opts.HealthChecker.Endpoint == "" {
+		opts.HealthChecker.Endpoint = "/health"
+	}
+	if opts.HealthChecker.Client == nil {
+		opts.HealthChecker.Client = &http.Client{Timeout: 5 * time.Second}
+	}
+	if opts.Discovery == nil {
+		opts.Discovery = DNSDiscovery{Hostname: "backend", Interval: 30 * time.Second}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	lb := &LoadBalancer{
+		active:    make(map[string]*Backend),
+		ctx:       ctx,
+		cancel:    cancel,
+		options:   opts,
+		startedAt: time.Now(),
+	}
+	go lb.startDiscovery()
 	return lb
 }
 
 // Close stops discovery and cancels all running health checks.
 func (lb *LoadBalancer) Close() {
 	lb.closeOnce.Do(func() {
-		if lb.stopCh != nil {
-			close(lb.stopCh)
+		if lb.cancel != nil {
+			lb.cancel()
 		}
 
 		lb.mu.Lock()
@@ -76,44 +104,33 @@ func newBackend(ip string) *Backend {
 		return nil
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(parsed)
-	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		http.Error(w, "Backend unavailable", http.StatusBadGateway)
-	}
-
-	return &Backend{
+	backend := &Backend{
 		URL:   parsed,
-		Proxy: proxy,
+		Proxy: httputil.NewSingleHostReverseProxy(parsed),
 		HealthCheck: &HealthCheck{
 			Status: true,
 		},
 	}
+	backend.Proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		backend.errors.Add(1)
+		http.Error(w, "Backend unavailable", http.StatusBadGateway)
+	}
+
+	return backend
 }
 
-func (lb *LoadBalancer) startDiscovery(interval time.Duration, stopCh <-chan struct{}) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	lb.syncBackends()
-
-	for {
-		select {
-		case <-ticker.C:
-			lb.syncBackends()
-		case <-stopCh:
-			return
-		}
+// startDiscovery applies every backend list the discovery strategy pushes,
+// until the load balancer is closed and the strategy closes its channel.
+func (lb *LoadBalancer) startDiscovery() {
+	for ips := range lb.options.Discovery.Watch(lb.ctx) {
+		lb.syncBackends(ips)
 	}
 }
 
-func (lb *LoadBalancer) syncBackends() {
-	ips, err := net.LookupHost("backend")
-	if err != nil {
-		log.Printf("DNS lookup failed: %v", err)
-		return
-	}
-
-	log.Printf("DNS resolved backend -> %v", ips)
+// syncBackends adds newly discovered backends and removes missing ones,
+// starting and stopping their health checks along the way.
+func (lb *LoadBalancer) syncBackends(ips []string) {
+	log.Printf("Discovered backends -> %v", ips)
 
 	resolved := make(map[string]struct{}, len(ips))
 	for _, ip := range ips {
@@ -123,7 +140,12 @@ func (lb *LoadBalancer) syncBackends() {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
 
-	// Add backends that are new in DNS.
+	// A list can arrive just as Close runs; don't start health checks after it.
+	if lb.ctx != nil && lb.ctx.Err() != nil {
+		return
+	}
+
+	// Add backends that were newly discovered.
 	for ip := range resolved {
 		if _, exists := lb.active[ip]; !exists {
 			backend := newBackend(ip)
@@ -133,12 +155,12 @@ func (lb *LoadBalancer) syncBackends() {
 			ctx, cancel := context.WithCancel(context.Background())
 			backend.cancel = cancel
 			lb.active[ip] = backend
-			go lb.runHealthCheck(ctx, backend)
+			go lb.options.HealthChecker.RunHealthCheck(ctx, backend)
 			log.Printf("Added backend %s", ip)
 		}
 	}
 
-	// Remove backends that have disappeared from DNS.
+	// Remove backends that are no longer discovered.
 	for ip, backend := range lb.active {
 		if _, exists := resolved[ip]; !exists {
 			backend.cancel()
@@ -172,17 +194,25 @@ func (lb *LoadBalancer) getNextBackend() *Backend {
 	}
 
 	if len(healthy) == 0 {
-	return nil
+		return nil
 	}
 	return lb.options.Selection.GetNextBackend(healthy)
 }
 
-// ServeHTTP implements round-robin proxying .
+// ServeHTTP proxies the request to the backend picked by the selection strategy.
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	backend := lb.getNextHealthyBackend()
+	lb.totalRequests.Add(1)
+
+	backend := lb.getNextBackend()
 	if backend == nil {
+		lb.unavailable.Add(1)
 		http.Error(w, "No backends available", http.StatusServiceUnavailable)
 		return
 	}
+
+	backend.requests.Add(1)
+	backend.inFlight.Add(1)
+	defer backend.inFlight.Add(-1)
+
 	backend.Proxy.ServeHTTP(w, r)
 }
