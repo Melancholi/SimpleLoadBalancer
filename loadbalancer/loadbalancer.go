@@ -25,6 +25,11 @@ type Backend struct {
 	Proxy       *httputil.ReverseProxy
 	HealthCheck *HealthCheck
 	cancel      context.CancelFunc
+type Options struct {
+	Selection     SelectionStrategy
+	HealthChecker *HealthChecker
+	Discovery     DiscoveryStrategy
+	//maybe logger
 }
 
 type LoadBalancer struct {
@@ -143,49 +148,7 @@ func (lb *LoadBalancer) syncBackends() {
 	}
 }
 
-// runHealthCheck polls a single backend until its context is cancelled.
-func (lb *LoadBalancer) runHealthCheck(ctx context.Context, backend *Backend) {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	// Check immediately on startup.
-	lb.checkBackend(backend)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			lb.checkBackend(backend)
-		}
-	}
-}
-
-func (lb *LoadBalancer) checkBackend(backend *Backend) {
-	healthURL := fmt.Sprintf("http://%s/health", backend.URL.Host)
-	client := &http.Client{Timeout: 5 * time.Second}
-
-	resp, err := client.Get(healthURL)
-
-	backend.HealthCheck.mu.Lock()
-	defer backend.HealthCheck.mu.Unlock()
-
-	if err != nil {
-		backend.HealthCheck.Status = false
-		log.Printf("Health check failed for %s: %v", backend.URL.Host, err)
-		return
-	}
-	defer resp.Body.Close()
-
-	backend.HealthCheck.Status = resp.StatusCode >= 200 && resp.StatusCode < 300
-	backend.HealthCheck.CheckedAt = time.Now()
-
-	if !backend.HealthCheck.Status {
-		log.Printf("Status %d for %s", resp.StatusCode, backend.URL.Host)
-	}
-}
-
-func (lb *LoadBalancer) getNextHealthyBackend() *Backend {
+func (lb *LoadBalancer) getNextBackend() *Backend {
 	lb.mu.RLock()
 	defer lb.mu.RUnlock()
 
@@ -193,30 +156,25 @@ func (lb *LoadBalancer) getNextHealthyBackend() *Backend {
 		return nil
 	}
 
+	//get all active backends
 	keys := make([]string, 0, len(lb.active))
 	for key := range lb.active {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 
-	idx := lb.counter.Add(1) - 1
-	attempts := 0
-
-	for attempts < len(keys) {
-		backend := lb.active[keys[(idx+uint64(attempts))%uint64(len(keys))]]
-
-		backend.HealthCheck.mu.RLock()
-		healthy := backend.HealthCheck.Status
-		backend.HealthCheck.mu.RUnlock()
-
-		if healthy {
-			return backend
+	//check which is healthy
+	healthy := make([]*Backend, 0, len(lb.active))
+	for _, key := range keys {
+		if lb.active[key].HealthCheck.IsHealthy() {
+			healthy = append(healthy, lb.active[key])
 		}
-
-		attempts++
 	}
 
+	if len(healthy) == 0 {
 	return nil
+	}
+	return lb.options.Selection.GetNextBackend(healthy)
 }
 
 // ServeHTTP implements round-robin proxying .
