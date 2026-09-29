@@ -1,5 +1,7 @@
 # SimpleLoadBalancer
 
+<img src="./SimpleLoadBalancer.png" alt="SimpleLoadBalancer architecture" width="200" height="100">
+
 Load Balancer implemented in go to balance traffic between instances of a server maintained using docker containers
 
 ## How to run
