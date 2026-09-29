@@ -1,6 +1,7 @@
 package loadbalancer
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func newTestBackend(t *testing.T, healthy bool, response string) *Backend {
@@ -43,14 +45,15 @@ func newTestBackend(t *testing.T, healthy bool, response string) *Backend {
 
 func TestGetNextHealthyBackendUsesStableRoundRobinOrder(t *testing.T) {
 	lb := &LoadBalancer{
+		options: Options{Selection: &RoundRobinSelection{}},
 		active: map[string]*Backend{
 			"10.0.0.2": newTestBackend(t, true, "backend-2"),
 			"10.0.0.1": newTestBackend(t, true, "backend-1"),
 		},
 	}
 
-	first := lb.getNextHealthyBackend()
-	second := lb.getNextHealthyBackend()
+	first := lb.getNextBackend()
+	second := lb.getNextBackend()
 
 	if first == nil || second == nil {
 		t.Fatalf("expected healthy backends, got first=%v second=%v", first, second)
@@ -70,13 +73,14 @@ func TestGetNextHealthyBackendSkipsUnhealthyBackends(t *testing.T) {
 	unhealthy := newTestBackend(t, false, "unhealthy")
 
 	lb := &LoadBalancer{
+		options: Options{Selection: &RoundRobinSelection{}},
 		active: map[string]*Backend{
 			"10.0.0.1": healthy,
 			"10.0.0.2": unhealthy,
 		},
 	}
 
-	backend := lb.getNextHealthyBackend()
+	backend := lb.getNextBackend()
 	if backend == nil {
 		t.Fatal("expected a healthy backend")
 	}
@@ -87,7 +91,7 @@ func TestGetNextHealthyBackendSkipsUnhealthyBackends(t *testing.T) {
 }
 
 func TestServeHTTPReturnsServiceUnavailableWhenNoBackendsAreAvailable(t *testing.T) {
-	lb := &LoadBalancer{active: map[string]*Backend{}}
+	lb := &LoadBalancer{active: map[string]*Backend{}, options: Options{Selection: &RoundRobinSelection{}}}
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 
@@ -101,6 +105,7 @@ func TestServeHTTPReturnsServiceUnavailableWhenNoBackendsAreAvailable(t *testing
 func TestServeHTTPProxiesToHealthyBackend(t *testing.T) {
 	backend := newTestBackend(t, true, "connected")
 	lb := &LoadBalancer{
+		options: Options{Selection: &RoundRobinSelection{}},
 		active: map[string]*Backend{
 			"10.0.0.1": backend,
 		},
@@ -156,7 +161,7 @@ func TestLoadBalancerUnderPressureWithHey(t *testing.T) {
 		}
 	}
 
-	lb := &LoadBalancer{active: active}
+	lb := &LoadBalancer{active: active, options: Options{Selection: &RoundRobinSelection{}}}
 
 	lbServer := httptest.NewServer(lb)
 	t.Cleanup(lbServer.Close)
@@ -199,4 +204,90 @@ func TestLoadBalancerUnderPressureWithHey(t *testing.T) {
 		backendHits[3].Load(),
 		backendHits[4].Load(),
 	})
+}
+
+func TestSnapshotCountsRequestsPerBackend(t *testing.T) {
+	lb := &LoadBalancer{
+		options: Options{Selection: &RoundRobinSelection{}},
+		active: map[string]*Backend{
+			"10.0.0.1": newTestBackend(t, true, "backend-1"),
+			"10.0.0.2": newTestBackend(t, true, "backend-2"),
+		},
+	}
+
+	for range 4 {
+		lb.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	}
+
+	m := lb.Snapshot()
+	if m.TotalRequests != 4 {
+		t.Fatalf("expected 4 total requests, got %d", m.TotalRequests)
+	}
+	if m.HealthyBackends != 2 || len(m.Backends) != 2 {
+		t.Fatalf("expected 2 healthy backends, got %d of %d", m.HealthyBackends, len(m.Backends))
+	}
+	for _, b := range m.Backends {
+		if b.Requests != 2 {
+			t.Fatalf("expected backend %s to serve 2 requests, got %d", b.Address, b.Requests)
+		}
+	}
+
+	empty := &LoadBalancer{active: map[string]*Backend{}, options: Options{Selection: &RoundRobinSelection{}}}
+	empty.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	if got := empty.Snapshot().Unavailable; got != 1 {
+		t.Fatalf("expected 1 unavailable request, got %d", got)
+	}
+}
+
+func TestSyncBackendsAddsAndRemovesBackends(t *testing.T) {
+	lb := &LoadBalancer{
+		active: map[string]*Backend{},
+		options: Options{
+			Selection: &RoundRobinSelection{},
+			// Health checks will fail against these fake IPs; keep them fast and rare.
+			HealthChecker: &HealthChecker{
+				Interval: time.Hour,
+				Endpoint: "/health",
+				Client:   &http.Client{Timeout: 10 * time.Millisecond},
+			},
+		},
+	}
+	t.Cleanup(lb.Close)
+
+	lb.syncBackends([]string{"10.0.0.1", "10.0.0.2"})
+	if len(lb.active) != 2 {
+		t.Fatalf("expected 2 backends after first sync, got %d", len(lb.active))
+	}
+
+	lb.syncBackends([]string{"10.0.0.2"})
+	if len(lb.active) != 1 {
+		t.Fatalf("expected 1 backend after second sync, got %d", len(lb.active))
+	}
+	if _, ok := lb.active["10.0.0.2"]; !ok {
+		t.Fatalf("expected 10.0.0.2 to remain, got %v", lb.active)
+	}
+}
+
+func TestDNSDiscoveryPushesAndStopsOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	updates := DNSDiscovery{Hostname: "localhost", Interval: time.Hour}.Watch(ctx)
+
+	select {
+	case ips := <-updates:
+		if len(ips) == 0 {
+			t.Fatal("expected localhost to resolve to at least one address")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for discovery")
+	}
+
+	cancel()
+	select {
+	case _, open := <-updates:
+		if open {
+			t.Fatal("expected channel to be closed after cancel")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("discovery did not stop after cancel")
+	}
 }
