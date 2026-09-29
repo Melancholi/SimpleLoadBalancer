@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Load Balancer Admin</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --surface: #ffffff;
+      --border: #e2e5ea;
+      --text: #1b1f24;
+      --muted: #5f6b7a;
+      --ok: #1a7f37;
+      --ok-bg: #dafbe1;
+      --bad: #c62828;
+      --bad-bg: #ffebe9;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1216;
+        --surface: #171b21;
+        --border: #2a3039;
+        --text: #e6e9ee;
+        --muted: #8b95a3;
+        --ok: #3fb950;
+        --ok-bg: #12261a;
+        --bad: #f85149;
+        --bad-bg: #2d1414;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    main { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+    header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    h1 { font-size: 20px; margin: 0; }
+    h2 { font-size: 15px; margin: 28px 0 10px; }
+    #status { color: var(--muted); font-size: 13px; }
+    #status.error { color: var(--bad); }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-top: 20px; }
+    .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+    .tile .label { color: var(--muted); font-size: 12px; }
+    .tile .value { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    th { color: var(--muted); font-weight: 500; font-size: 12px; }
+    tr:last-child td { border-bottom: none; }
+    td.num { font-variant-numeric: tabular-nums; }
+    .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+    .badge.ok { color: var(--ok); background: var(--ok-bg); }
+    .badge.bad { color: var(--bad); background: var(--bad-bg); }
+    .empty { color: var(--muted); text-align: center; padding: 24px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Load Balancer Admin</h1>
+      <span id="status">Connecting…</span>
+    </header>
+
+    <section class="tiles">
+      <div class="tile"><div class="label">Uptime</div><div class="value" id="uptime">–</div></div>
+      <div class="tile"><div class="label">Total requests</div><div class="value" id="total">–</div></div>
+      <div class="tile"><div class="label">Requests / sec</div><div class="value" id="rps">–</div></div>
+      <div class="tile"><div class="label">Healthy backends</div><div class="value" id="healthy">–</div></div>
+      <div class="tile"><div class="label">Rejected (503)</div><div class="value" id="unavailable">–</div></div>
+    </section>
+
+    <h2>Backends</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Address</th>
+            <th>Status</th>
+            <th>Requests</th>
+            <th>Share</th>
+            <th>Errors (502)</th>
+            <th>In flight</th>
+            <th>Last health check</th>
+          </tr>
+        </thead>
+        <tbody id="backends">
+          <tr><td class="empty" colspan="7">Waiting for data…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <script>
+    const POLL_MS = 2000;
+    const fmt = new Intl.NumberFormat();
+    let previous = null;
+
+    function formatUptime(seconds) {
+      const s = Math.floor(seconds);
+      const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+      if (d) return `${d}d ${h}h`;
+      if (h) return `${h}h ${m}m`;
+      if (m) return `${m}m ${s % 60}s`;
+      return `${s}s`;
+    }
+
+    function formatAgo(iso) {
+      const t = Date.parse(iso);
+      if (!t || t < 0) return "never";
+      const secs = Math.max(0, Math.round((Date.now() - t) / 1000));
+      return `${secs}s ago`;
+    }
+
+    function cell(text, className) {
+      const td = document.createElement("td");
+      td.textContent = text;
+      if (className) td.className = className;
+      return td;
+    }
+
+    function render(m) {
+      const now = performance.now();
+      document.getElementById("uptime").textContent = formatUptime(m.uptime_seconds);
+      document.getElementById("total").textContent = fmt.format(m.total_requests);
+      document.getElementById("healthy").textContent = `${m.healthy_backends} / ${m.backends.length}`;
+      document.getElementById("unavailable").textContent = fmt.format(m.unavailable);
+
+      if (previous && m.total_requests >= previous.total) {
+        const rps = (m.total_requests - previous.total) / ((now - previous.at) / 1000);
+        document.getElementById("rps").textContent = rps.toFixed(1);
+      }
+      previous = { total: m.total_requests, at: now };
+
+      const tbody = document.getElementById("backends");
+      tbody.replaceChildren();
+
+      if (m.backends.length === 0) {
+        const tr = document.createElement("tr");
+        tr.appendChild(cell("No backends discovered", "empty")).colSpan = 7;
+        tbody.appendChild(tr);
+        return;
+      }
+
+      const served = m.backends.reduce((sum, b) => sum + b.requests, 0);
+      for (const b of m.backends) {
+        const tr = document.createElement("tr");
+        tr.appendChild(cell(b.address));
+
+        const status = document.createElement("td");
+        const badge = document.createElement("span");
+        badge.className = "badge " + (b.healthy ? "ok" : "bad");
+        badge.textContent = b.healthy ? "Healthy" : "Unhealthy";
+        status.appendChild(badge);
+        tr.appendChild(status);
+
+        tr.appendChild(cell(fmt.format(b.requests), "num"));
+        tr.appendChild(cell(served ? `${(b.requests / served * 100).toFixed(1)}%` : "–", "num"));
+        tr.appendChild(cell(fmt.format(b.errors), "num"));
+        tr.appendChild(cell(fmt.format(b.in_flight), "num"));
+        tr.appendChild(cell(formatAgo(b.checked_at)));
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function poll() {
+      const status = document.getElementById("status");
+      try {
+        const res = await fetch("api/metrics", { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        render(await res.json());
+        status.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+        status.className = "";
+      } catch (err) {
+        status.textContent = `Load balancer unreachable (${err.message})`;
+        status.className = "error";
+      } finally {
+        setTimeout(poll, POLL_MS);
+      }
+    }
+
+    poll();
+  </script>
+</body>
+</html>
