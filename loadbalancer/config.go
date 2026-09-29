@@ -9,8 +9,9 @@ import (
 
 type Config struct {
 	Server struct {
-		HealthCheckInterval int `toml:"health_check_interval"`
-		HealthFailRate      int `toml:"health_fail_rate"`
+		HealthEndpoint      string `toml:"health_endpoint"`
+		HealthCheckInterval int    `toml:"health_check_interval"`
+		HealthFailRate      int    `toml:"health_fail_rate"`
 	} `toml:"server"`
 }
 
